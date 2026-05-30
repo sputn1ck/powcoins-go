@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
+	"sort"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -16,7 +18,10 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/sputn1ck/webgpu-sha/shasolve"
 )
+
+var ErrClaimCanceled = errors.New("claim canceled")
 
 type ClaimOptions struct {
 	Address       string
@@ -25,8 +30,31 @@ type ClaimOptions struct {
 	MinDifficulty int
 	MaxDifficulty int
 	FeeRate       int64
+	GrindSolver   shasolve.Solver
+	ConfirmUTXO   func(context.Context, ClaimCandidate) (ClaimDecision, error)
 	Progress      func(string, ...any)
 	GrindProgress func(tries uint64, elapsedSeconds float64, mhps float64)
+}
+
+type ClaimDecision int
+
+const (
+	ClaimDecisionAccept ClaimDecision = iota
+	ClaimDecisionSkip
+	ClaimDecisionCancel
+)
+
+type ClaimCandidate struct {
+	UTXO          UTXO
+	Difficulty    int
+	Confirmations int64
+	CSV           int64
+	FeeRate       int64
+	Fee           int64
+	OutputValue   int64
+	Index         int
+	Total         int
+	score         float64
 }
 
 type ClaimResult struct {
@@ -104,10 +132,7 @@ func BuildClaim(ctx context.Context, opts ClaimOptions) (ClaimResult, error) {
 		return ClaimResult{}, fmt.Errorf("no faucet UTXOs found in scanned history")
 	}
 
-	var selected UTXO
-	var selectedDiff int
-	var selectedConf int64
-	bestScore := math.Inf(-1)
+	var candidates []ClaimCandidate
 	easiest := math.MaxInt
 	hardest := 0
 	for _, utxo := range utxos {
@@ -121,23 +146,48 @@ func BuildClaim(ctx context.Context, opts ClaimOptions) (ClaimResult, error) {
 		if diff < opts.MinDifficulty || diff > opts.MaxDifficulty {
 			continue
 		}
-		score := math.Log2(float64(utxo.Value)) - float64(diff) + rand.Float64()
-		if score > bestScore {
-			bestScore = score
-			selected = utxo
-			selectedDiff = diff
-			selectedConf = conf
+		csv := int64(utxo.Script.MaxDiff-diff) * utxo.Script.Delay
+		if conf < csv {
+			continue
 		}
+		_, fee, outputValue, err := unsignedClaimTx(utxo, payTo, csv, feerate)
+		if err != nil {
+			logf("skipping %s:%d: %v", utxo.TxID, utxo.Vout, err)
+			continue
+		}
+		score := math.Log2(float64(utxo.Value)) - float64(diff) + rand.Float64()
+		candidates = append(candidates, ClaimCandidate{
+			UTXO:          utxo,
+			Difficulty:    diff,
+			Confirmations: conf,
+			CSV:           csv,
+			FeeRate:       feerate,
+			Fee:           fee,
+			OutputValue:   outputValue,
+			score:         score,
+		})
 	}
-	if bestScore == math.Inf(-1) {
+	if len(candidates) == 0 {
 		return ClaimResult{}, fmt.Errorf("no faucet UTXO found in difficulty range [%d,%d]; scanned range [%d,%d]",
 			opts.MinDifficulty, opts.MaxDifficulty, easiest, hardest)
 	}
 
-	csv := int64(selected.Script.MaxDiff-selectedDiff) * selected.Script.Delay
-	if selectedConf < csv {
-		return ClaimResult{}, fmt.Errorf("selected UTXO has %d confirmations but needs CSV %d", selectedConf, csv)
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+	for i := range candidates {
+		candidates[i].Index = i + 1
+		candidates[i].Total = len(candidates)
 	}
+
+	selectedCandidate, err := selectClaimCandidate(ctx, candidates, opts.ConfirmUTXO)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	selected := selectedCandidate.UTXO
+	selectedDiff := selectedCandidate.Difficulty
+	selectedConf := selectedCandidate.Confirmations
+	csv := selectedCandidate.CSV
 
 	tx, fee, outputValue, err := unsignedClaimTx(selected, payTo, csv, feerate)
 	if err != nil {
@@ -165,11 +215,7 @@ func BuildClaim(ctx context.Context, opts ClaimOptions) (ClaimResult, error) {
 	logf("selected %s:%d value=%d sats conf=%d diff=%d csv=%d fee=%d sats",
 		selected.TxID, selected.Vout, selected.Value, selectedConf, selectedDiff, csv, fee)
 	logf("grinding fake block header at difficulty %d", selectedDiff)
-	grind, err := GrindHeader(ctx, header, selectedDiff, func(tries uint64, elapsed time.Duration) {
-		if opts.GrindProgress != nil {
-			opts.GrindProgress(tries, elapsed.Seconds(), float64(tries)/max(elapsed.Seconds(), 0.001)/1_000_000)
-		}
-	})
+	grind, err := grindHeader(ctx, header, selectedDiff, opts)
 	if err != nil {
 		return ClaimResult{}, err
 	}
@@ -207,6 +253,63 @@ func BuildClaim(ctx context.Context, opts ClaimOptions) (ClaimResult, error) {
 		OutputValue:     outputValue,
 		Grind:           grind,
 		ScannedUTXOSize: len(utxos),
+	}, nil
+}
+
+func selectClaimCandidate(ctx context.Context, candidates []ClaimCandidate, confirm func(context.Context, ClaimCandidate) (ClaimDecision, error)) (ClaimCandidate, error) {
+	if confirm == nil {
+		return candidates[0], nil
+	}
+	for _, candidate := range candidates {
+		decision, err := confirm(ctx, candidate)
+		if err != nil {
+			return ClaimCandidate{}, err
+		}
+		switch decision {
+		case ClaimDecisionAccept:
+			return candidate, nil
+		case ClaimDecisionSkip:
+			continue
+		case ClaimDecisionCancel:
+			return ClaimCandidate{}, ErrClaimCanceled
+		default:
+			return ClaimCandidate{}, fmt.Errorf("unknown claim decision %d", decision)
+		}
+	}
+	return ClaimCandidate{}, fmt.Errorf("no faucet UTXO selected")
+}
+
+func grindHeader(ctx context.Context, header []byte, difficulty int, opts ClaimOptions) (GrindResult, error) {
+	if opts.GrindSolver == nil {
+		return GrindHeader(ctx, header, difficulty, func(tries uint64, elapsed time.Duration) {
+			if opts.GrindProgress != nil {
+				opts.GrindProgress(tries, elapsed.Seconds(), float64(tries)/max(elapsed.Seconds(), 0.001)/1_000_000)
+			}
+		})
+	}
+
+	if len(header) != 80 {
+		return GrindResult{}, fmt.Errorf("header must be 80 bytes, got %d", len(header))
+	}
+	var fixedHeader [80]byte
+	copy(fixedHeader[:], header)
+	result, err := opts.GrindSolver.Solve(ctx, shasolve.Job{
+		Header:     fixedHeader,
+		Difficulty: uint32(difficulty),
+	})
+	if err != nil {
+		return GrindResult{}, err
+	}
+	if opts.GrindProgress != nil {
+		opts.GrindProgress(result.Tries, result.Elapsed.Seconds(), result.HashesPerSecond/1_000_000)
+	}
+	return GrindResult{
+		Header:          append([]byte(nil), result.Header[:]...),
+		Hash:            append([]byte(nil), result.Hash[:]...),
+		Nonce:           result.Nonce,
+		Tries:           result.Tries,
+		Elapsed:         result.Elapsed,
+		HashesPerSecond: result.HashesPerSecond,
 	}, nil
 }
 
