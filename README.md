@@ -52,7 +52,7 @@ Useful options:
   -address <signet-address> \
   -solver auto \
   -min-difficulty 20 \
-  -max-difficulty 26 \
+  -max-difficulty 35 \
   -max-pages 40 \
   -fee-rate 1 \
   -peer-messages \
@@ -115,7 +115,7 @@ import "github.com/sputn1ck/powcoins-go/powcoins"
 result, err := powcoins.BuildClaim(ctx, powcoins.ClaimOptions{
     Address:       "tb1...",
     MinDifficulty: 20,
-    MaxDifficulty: 26,
+    MaxDifficulty: 35,
     FeeRate:       1,
 })
 ```

@@ -79,7 +79,7 @@ func BuildClaim(ctx context.Context, opts ClaimOptions) (ClaimResult, error) {
 		opts.MaxPages = 40
 	}
 	if opts.MaxDifficulty <= 0 {
-		opts.MaxDifficulty = 26
+		opts.MaxDifficulty = 35
 	}
 	if opts.MinDifficulty < 0 {
 		return ClaimResult{}, fmt.Errorf("min difficulty must be non-negative")

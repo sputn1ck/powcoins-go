@@ -27,7 +27,7 @@ func main() {
 		relayPeer    = flag.String("relay-peer", powcoins.DefaultRelayPeer, "signet P2P peer that accepts OP_CAT spends")
 		maxPages     = flag.Int("max-pages", 40, "maximum Esplora history pages to scan per faucet address")
 		minDiff      = flag.Int("min-difficulty", 0, "minimum PoW difficulty to select; useful to avoid highly contested low-difficulty UTXOs")
-		maxDiff      = flag.Int("max-difficulty", 26, "maximum PoW difficulty to attempt")
+		maxDiff      = flag.Int("max-difficulty", 35, "maximum PoW difficulty to attempt")
 		dryRun       = flag.Bool("dry-run", false, "build and mine the transaction without relaying it")
 		relayTimeout = flag.Duration("relay-timeout", 30*time.Second, "P2P relay timeout")
 		peerMessages = flag.Bool("peer-messages", false, "print P2P messages during relay")
