@@ -35,6 +35,8 @@ Useful options:
   -max-difficulty 26 \
   -max-pages 40 \
   -feerate 1 \
+  -peer-messages \
+  -peer-listen 5s \
   -relay-peer inquisition.bitcoin-signet.net:38333
 ```
 
@@ -42,6 +44,11 @@ The default Esplora endpoint is `https://mempool.space/signet/api`. Public
 Esplora instances can cap large faucet UTXO sets, so the CLI scans paged address
 history and derives unspent outputs locally instead of relying on
 `/address/:address/utxo`.
+
+`-peer-messages` prints P2P commands sent and received during relay. With
+`-peer-listen`, the CLI keeps the peer connection open after sending the
+transaction so you can inspect follow-up messages such as `reject`, `notfound`,
+or `ping`.
 
 ## Library
 
