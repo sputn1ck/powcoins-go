@@ -16,6 +16,12 @@ Build the CLI:
 go build -o powcoins-go ./cmd/powcoins-go
 ```
 
+Or install it directly from the renamed GitHub repo:
+
+```sh
+go install github.com/sputn1ck/powcoins-go/cmd/powcoins-go@latest
+```
+
 Dry-run without relaying:
 
 ```sh
@@ -103,6 +109,8 @@ At 5 MH/s, expected average solve times are approximately:
 The claim builder can be used as a Go package:
 
 ```go
+import "github.com/sputn1ck/powcoins-go/powcoins"
+
 result, err := powcoins.BuildClaim(ctx, powcoins.ClaimOptions{
     Address:       "tb1...",
     MinDifficulty: 20,

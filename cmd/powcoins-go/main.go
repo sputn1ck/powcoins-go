@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/wire"
-	"github.com/sputn1ck/webgpu-sha/powcoins"
-	"github.com/sputn1ck/webgpu-sha/shasolve"
+	"github.com/sputn1ck/powcoins-go/powcoins"
+	"github.com/sputn1ck/powcoins-go/shasolve"
 )
 
 func main() {

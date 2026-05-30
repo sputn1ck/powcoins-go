@@ -57,7 +57,7 @@ func NewPowcoinHeader(signature [64]byte, difficulty uint32) ([80]byte, error) {
 
 func BenchmarkSignature() [64]byte {
 	var sig [64]byte
-	seed := chainhash.DoubleHashB([]byte("github.com/sputn1ck/webgpu-sha powcoin benchmark signature v1"))
+	seed := chainhash.DoubleHashB([]byte("github.com/sputn1ck/powcoins-go powcoin benchmark signature v1"))
 	copy(sig[:32], seed)
 	seed2 := chainhash.DoubleHashB(seed)
 	copy(sig[32:], seed2)

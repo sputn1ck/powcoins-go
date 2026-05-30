@@ -1,4 +1,4 @@
-module github.com/sputn1ck/webgpu-sha
+module github.com/sputn1ck/powcoins-go
 
 go 1.25.0
 

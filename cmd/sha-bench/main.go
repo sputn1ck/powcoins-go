@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sputn1ck/webgpu-sha/shasolve"
+	"github.com/sputn1ck/powcoins-go/shasolve"
 )
 
 func main() {

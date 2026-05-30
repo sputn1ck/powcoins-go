@@ -18,7 +18,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/sputn1ck/webgpu-sha/shasolve"
+	"github.com/sputn1ck/powcoins-go/shasolve"
 )
 
 var ErrClaimCanceled = errors.New("claim canceled")
