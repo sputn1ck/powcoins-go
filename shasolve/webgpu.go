@@ -57,31 +57,15 @@ func (s *WebGPUSolver) Solve(ctx context.Context, job Job) (Result, error) {
 	}
 	defer device.Release()
 
+	shaderSource := buildWebGPUShader(job.Header, job.Difficulty)
 	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
 		Label: "powcoin-shader",
-		WGSL:  webgpuShader,
+		WGSL:  shaderSource,
 	})
 	if err != nil {
 		return Result{}, err
 	}
 	defer shader.Release()
-
-	headerBuffer, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "powcoin-header-buffer",
-		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
-		Size:  80 * 4,
-	})
-	if err != nil {
-		return Result{}, err
-	}
-	defer headerBuffer.Release()
-	headerData := make([]byte, 80*4)
-	for i, b := range job.Header {
-		binary.LittleEndian.PutUint32(headerData[i*4:], uint32(b))
-	}
-	if err := device.Queue().WriteBuffer(headerBuffer, 0, headerData); err != nil {
-		return Result{}, err
-	}
 
 	paramsBuffer, err := device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "powcoin-params-buffer",
@@ -120,20 +104,12 @@ func (s *WebGPUSolver) Solve(ctx context.Context, job Job) (Result, error) {
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
 				Buffer: &gputypes.BufferBindingLayout{
-					Type:           gputypes.BufferBindingTypeReadOnlyStorage,
-					MinBindingSize: 80 * 4,
-				},
-			},
-			{
-				Binding:    1,
-				Visibility: wgpu.ShaderStageCompute,
-				Buffer: &gputypes.BufferBindingLayout{
 					Type:           gputypes.BufferBindingTypeUniform,
 					MinBindingSize: 16,
 				},
 			},
 			{
-				Binding:    2,
+				Binding:    1,
 				Visibility: wgpu.ShaderStageCompute,
 				Buffer: &gputypes.BufferBindingLayout{
 					Type:           gputypes.BufferBindingTypeStorage,
@@ -151,9 +127,8 @@ func (s *WebGPUSolver) Solve(ctx context.Context, job Job) (Result, error) {
 		Label:  "powcoin-bind-group",
 		Layout: layout,
 		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Buffer: headerBuffer, Size: 80 * 4},
-			{Binding: 1, Buffer: paramsBuffer, Size: 16},
-			{Binding: 2, Buffer: resultBuffer, Size: 4},
+			{Binding: 0, Buffer: paramsBuffer, Size: 16},
+			{Binding: 1, Buffer: resultBuffer, Size: 4},
 		},
 	})
 	if err != nil {
@@ -199,7 +174,7 @@ func (s *WebGPUSolver) Solve(ctx context.Context, job Job) (Result, error) {
 		if err := device.Queue().WriteBuffer(resultBuffer, 0, u32Bytes(NotFound)); err != nil {
 			return Result{}, err
 		}
-		if err := device.Queue().WriteBuffer(paramsBuffer, 0, paramsBytes(current, count, job.Difficulty)); err != nil {
+		if err := device.Queue().WriteBuffer(paramsBuffer, 0, paramsBytes(current, count)); err != nil {
 			return Result{}, err
 		}
 
@@ -257,13 +232,65 @@ func u32Bytes(v uint32) []byte {
 	return buf
 }
 
-func paramsBytes(startNonce, count, difficulty uint32) []byte {
+func paramsBytes(startNonce, count uint32) []byte {
 	buf := make([]byte, 16)
 	binary.LittleEndian.PutUint32(buf[0:4], startNonce)
 	binary.LittleEndian.PutUint32(buf[4:8], count)
-	binary.LittleEndian.PutUint32(buf[8:12], difficulty)
 	return buf
 }
+
+func powcoinMidstate(header [80]byte) ([8]uint32, [3]uint32) {
+	h := [8]uint32{
+		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+		0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+	}
+	var w [16]uint32
+	for i := range w {
+		w[i] = headerWord(header, uint32(i))
+	}
+	cpuSHA256Compress(&h, &w)
+	return h, [3]uint32{
+		headerWord(header, 16),
+		headerWord(header, 17),
+		headerWord(header, 18),
+	}
+}
+
+func headerWord(header [80]byte, idx uint32) uint32 {
+	j := idx * 4
+	return uint32(header[j])<<24 | uint32(header[j+1])<<16 | uint32(header[j+2])<<8 | uint32(header[j+3])
+}
+
+func cpuSHA256Compress(h *[8]uint32, w *[16]uint32) {
+	a, b, c, d := h[0], h[1], h[2], h[3]
+	e, f, g, hh := h[4], h[5], h[6], h[7]
+	for i, k := range sha256RoundConstants {
+		wi := w[i&15]
+		if i >= 16 {
+			wi = ssig1CPU(w[(i-2)&15]) + w[(i-7)&15] + ssig0CPU(w[(i-15)&15]) + w[i&15]
+			w[i&15] = wi
+		}
+		t1 := hh + bsig1CPU(e) + chCPU(e, f, g) + k + wi
+		t2 := bsig0CPU(a) + majCPU(a, b, c)
+		hh, g, f, e, d, c, b, a = g, f, e, d+t1, c, b, a, t1+t2
+	}
+	h[0] += a
+	h[1] += b
+	h[2] += c
+	h[3] += d
+	h[4] += e
+	h[5] += f
+	h[6] += g
+	h[7] += hh
+}
+
+func rotrCPU(x uint32, n uint) uint32 { return (x >> n) | (x << (32 - n)) }
+func chCPU(x, y, z uint32) uint32     { return (x & y) ^ (^x & z) }
+func majCPU(x, y, z uint32) uint32    { return (x & y) ^ (x & z) ^ (y & z) }
+func bsig0CPU(x uint32) uint32        { return rotrCPU(x, 2) ^ rotrCPU(x, 13) ^ rotrCPU(x, 22) }
+func bsig1CPU(x uint32) uint32        { return rotrCPU(x, 6) ^ rotrCPU(x, 11) ^ rotrCPU(x, 25) }
+func ssig0CPU(x uint32) uint32        { return rotrCPU(x, 7) ^ rotrCPU(x, 18) ^ (x >> 3) }
+func ssig1CPU(x uint32) uint32        { return rotrCPU(x, 17) ^ rotrCPU(x, 19) ^ (x >> 10) }
 
 var sha256RoundConstants = [...]uint32{
 	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
@@ -284,22 +311,58 @@ var sha256RoundConstants = [...]uint32{
 	0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 }
 
-func buildWebGPUShader() string {
-	return strings.Replace(webgpuShaderTemplate, "{{COMPRESS}}", buildWebGPUCompress(), 1)
+func buildWebGPUShader(header [80]byte, difficulty uint32) string {
+	mid, tail := powcoinMidstate(header)
+	shader := strings.Replace(webgpuShaderTemplate, "{{CONSTANTS}}", buildWebGPUConstants(mid, tail), 1)
+	shader = strings.Replace(shader, "{{COMPRESS}}", buildWebGPUCompress(), 1)
+	return strings.Replace(shader, "{{DIFFICULTY_CHECK}}", buildWebGPUDifficultyCheck(difficulty), 1)
+}
+
+func buildWebGPUConstants(mid [8]uint32, tail [3]uint32) string {
+	var b strings.Builder
+	for i, v := range mid {
+		fmt.Fprintf(&b, "const MID_%d: u32 = 0x%08xu;\n", i, v)
+	}
+	for i, v := range tail {
+		fmt.Fprintf(&b, "const TAIL_%d: u32 = 0x%08xu;\n", i, v)
+	}
+	return b.String()
+}
+
+func buildWebGPUDifficultyCheck(difficulty uint32) string {
+	if difficulty == 0 {
+		return "    return true;\n"
+	}
+	var conditions []string
+	remaining := difficulty
+	for _, word := range []string{"h7", "h6", "h5"} {
+		if remaining == 0 {
+			break
+		}
+		if remaining >= 32 {
+			conditions = append(conditions, fmt.Sprintf("%s == 0u", word))
+			remaining -= 32
+			continue
+		}
+		mask := (uint32(1) << remaining) - 1
+		conditions = append(conditions, fmt.Sprintf("(%s & 0x%08xu) == 0u", word, mask))
+		break
+	}
+	return fmt.Sprintf("    return %s;\n", strings.Join(conditions, " && "))
 }
 
 func buildWebGPUCompress() string {
 	var b strings.Builder
-	b.WriteString("fn compress(h: ptr<function, array<u32, 8>>, w: ptr<function, array<u32, 64>>) {\n")
-	for i := 16; i < 64; i++ {
-		fmt.Fprintf(&b,
-			"    (*w)[%du] = ssig1((*w)[%du]) + (*w)[%du] + ssig0((*w)[%du]) + (*w)[%du];\n",
-			i, i-2, i-7, i-15, i-16)
-	}
+	b.WriteString("fn compress(h: ptr<function, array<u32, 8>>, w: ptr<function, array<u32, 16>>) {\n")
 	b.WriteString("    var a = (*h)[0]; var b = (*h)[1]; var c = (*h)[2]; var d = (*h)[3];\n")
 	b.WriteString("    var e = (*h)[4]; var f = (*h)[5]; var g = (*h)[6]; var hh = (*h)[7];\n")
 	for i, k := range sha256RoundConstants {
-		fmt.Fprintf(&b, "    let t1_%d = hh + bsig1(e) + ch(e, f, g) + 0x%08xu + (*w)[%du];\n", i, k, i)
+		if i >= 16 {
+			fmt.Fprintf(&b,
+				"    (*w)[%du] = ssig1((*w)[%du]) + (*w)[%du] + ssig0((*w)[%du]) + (*w)[%du];\n",
+				i&15, (i-2)&15, (i-7)&15, (i-15)&15, i&15)
+		}
+		fmt.Fprintf(&b, "    let t1_%d = hh + bsig1(e) + ch(e, f, g) + 0x%08xu + (*w)[%du];\n", i, k, i&15)
 		fmt.Fprintf(&b, "    let t2_%d = bsig0(a) + maj(a, b, c);\n", i)
 		fmt.Fprintf(&b, "    hh = g; g = f; f = e; e = d + t1_%d; d = c; c = b; b = a; a = t1_%d + t2_%d;\n", i, i, i)
 	}
@@ -309,23 +372,22 @@ func buildWebGPUCompress() string {
 	return b.String()
 }
 
-var webgpuShader = buildWebGPUShader()
-
 const webgpuShaderTemplate = `
 struct Params {
     start_nonce: u32,
     count: u32,
-    difficulty: u32,
-    pad: u32,
+    pad0: u32,
+    pad1: u32,
 }
 
 struct Result {
     nonce: atomic<u32>,
 }
 
-@group(0) @binding(0) var<storage, read> header: array<u32>;
-@group(0) @binding(1) var<uniform> params: Params;
-@group(0) @binding(2) var<storage, read_write> result: Result;
+{{CONSTANTS}}
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> result: Result;
 
 fn rotr(x: u32, n: u32) -> u32 { return (x >> n) | (x << (32u - n)); }
 fn ch(x: u32, y: u32, z: u32) -> u32 { return (x & y) ^ ((~x) & z); }
@@ -334,11 +396,6 @@ fn bsig0(x: u32) -> u32 { return rotr(x, 2u) ^ rotr(x, 13u) ^ rotr(x, 22u); }
 fn bsig1(x: u32) -> u32 { return rotr(x, 6u) ^ rotr(x, 11u) ^ rotr(x, 25u); }
 fn ssig0(x: u32) -> u32 { return rotr(x, 7u) ^ rotr(x, 18u) ^ (x >> 3u); }
 fn ssig1(x: u32) -> u32 { return rotr(x, 17u) ^ rotr(x, 19u) ^ (x >> 10u); }
-
-fn word_at(idx: u32) -> u32 {
-    let j = idx * 4u;
-    return ((header[j] & 0xffu) << 24u) | ((header[j + 1u] & 0xffu) << 16u) | ((header[j + 2u] & 0xffu) << 8u) | (header[j + 3u] & 0xffu);
-}
 
 fn nonce_word(nonce: u32) -> u32 {
     return ((nonce & 0xffu) << 24u) | (((nonce >> 8u) & 0xffu) << 16u) | (((nonce >> 16u) & 0xffu) << 8u) | ((nonce >> 24u) & 0xffu);
@@ -351,34 +408,20 @@ fn init_hash(h: ptr<function, array<u32, 8>>) {
 
 {{COMPRESS}}
 
-fn word_trailing_zero(word: u32, bits: u32) -> bool {
-    if (bits == 0u) { return true; }
-    if (bits >= 32u) { return word == 0u; }
-    return (word & ((1u << bits) - 1u)) == 0u;
-}
-
-fn has_trailing_difficulty(h5: u32, h6: u32, h7: u32, difficulty: u32) -> bool {
-    var remaining = difficulty;
-    if (remaining <= 32u) { return word_trailing_zero(h7, remaining); }
-    if (h7 != 0u) { return false; }
-    remaining = remaining - 32u;
-    if (remaining <= 32u) { return word_trailing_zero(h6, remaining); }
-    if (h6 != 0u) { return false; }
-    remaining = remaining - 32u;
-    return word_trailing_zero(h5, remaining);
+fn has_trailing_difficulty(h5: u32, h6: u32, h7: u32) -> bool {
+{{DIFFICULTY_CHECK}}
 }
 
 fn check_nonce(nonce: u32) -> bool {
     var h: array<u32, 8>;
     var h2: array<u32, 8>;
-    var w: array<u32, 64>;
-    init_hash(&h);
-    for (var i = 0u; i < 16u; i = i + 1u) { w[i] = word_at(i); }
-    compress(&h, &w);
+    var w: array<u32, 16>;
+    h[0] = MID_0; h[1] = MID_1; h[2] = MID_2; h[3] = MID_3;
+    h[4] = MID_4; h[5] = MID_5; h[6] = MID_6; h[7] = MID_7;
 
-    w[0] = word_at(16u);
-    w[1] = word_at(17u);
-    w[2] = word_at(18u);
+    w[0] = TAIL_0;
+    w[1] = TAIL_1;
+    w[2] = TAIL_2;
     w[3] = nonce_word(nonce);
     w[4] = 0x80000000u;
     for (var i = 5u; i < 15u; i = i + 1u) { w[i] = 0u; }
@@ -392,14 +435,13 @@ fn check_nonce(nonce: u32) -> bool {
     w[15] = 256u;
     compress(&h2, &w);
 
-    return has_trailing_difficulty(h2[5], h2[6], h2[7], params.difficulty);
+    return has_trailing_difficulty(h2[5], h2[6], h2[7]);
 }
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let gid = id.x;
     if (gid >= params.count) { return; }
-    if (atomicLoad(&result.nonce) != 0xffffffffu) { return; }
     let nonce = params.start_nonce + gid;
     if (check_nonce(nonce)) {
         var expected = 0xffffffffu;
