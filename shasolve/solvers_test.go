@@ -32,6 +32,20 @@ func TestMetalSolverLowDifficulty(t *testing.T) {
 	}
 }
 
+func TestCUDASolverLowDifficulty(t *testing.T) {
+	job := DefaultBenchmarkJob(12)
+	job.Limit = 1 << 20
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	result, err := (CUDASolver{BatchSize: 1 << 16}).Solve(ctx, job)
+	if err != nil {
+		t.Skipf("cuda solver unavailable: %v", err)
+	}
+	if _, ok := Verify(job, result.Nonce); !ok {
+		t.Fatalf("invalid nonce %d", result.Nonce)
+	}
+}
+
 func TestWebGPUSolverLowDifficulty(t *testing.T) {
 	job := DefaultBenchmarkJob(12)
 	job.Limit = 1 << 20

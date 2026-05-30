@@ -1,4 +1,4 @@
-//go:build js
+//go:build js || cuda
 
 package shasolve
 
@@ -14,5 +14,5 @@ type WebGPUSolver struct {
 func (*WebGPUSolver) Name() string { return "webgpu" }
 
 func (*WebGPUSolver) Solve(context.Context, Job) (Result, error) {
-	return Result{}, fmt.Errorf("native WebGPU solver is unavailable for js builds")
+	return Result{}, fmt.Errorf("native WebGPU solver is unavailable for this build")
 }

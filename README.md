@@ -83,13 +83,14 @@ improve your chances by selecting less-contested UTXOs, though each additional
 difficulty bit roughly doubles the expected grind time.
 
 `-solver` selects the proof-of-work backend. The default is `auto`, which tries
-`metal` first, then `webgpu`, then `cpu`. You can override it with `cpu`,
-`metal`, or `webgpu`. The Metal backend requests Metal language 4.0 on macOS
+`metal` first, then `cuda`, then `webgpu`, then `cpu`. You can override it with
+`cpu`, `metal`, `cuda`, or `webgpu`. The Metal backend requests Metal language 4.0 on macOS
 versions that expose it.
 
 The command builds on non-mac platforms. Metal code is compiled only on
-`darwin` with cgo; other builds use a stub that reports Metal as unavailable, so
-`-solver auto` proceeds to WebGPU and then CPU.
+`darwin` with cgo, and CUDA is compiled only for Linux cgo builds with
+`-tags cuda`; other builds use stubs that report those backends as unavailable,
+so `-solver auto` proceeds to the next backend.
 
 At 5 MH/s, expected average solve times are approximately:
 
@@ -143,8 +144,24 @@ double_sha256(80-byte powcoin fake block header with uint32_le nonce at bytes 76
 Available native backends:
 
 - `metal`: direct Apple Metal compute backend.
+- `cuda`: NVIDIA CUDA backend using the CUDA driver API and NVRTC.
 - `webgpu`: native WebGPU backend through `github.com/gogpu/wgpu`.
 - `cpu`: reference implementation for correctness checks.
+
+The CUDA backend is opt-in because it adds native C objects to the build:
+
+```sh
+go run -tags cuda ./cmd/sha-bench -difficulty 28 -backends cuda
+```
+
+The default build keeps the WebGPU backend enabled. CUDA-tagged builds disable
+the WebGPU backend because the current WebGPU dependency uses dynamic-import
+assembly that does not link together with package-local C objects.
+
+On an RTX 4090 under WSL2, the optimized CUDA backend has measured roughly
+`6.7-7.2 GH/s` on the deterministic difficulty-28/29 benchmark job. It
+precomputes the nonce-independent SHA-256 midstate on the CPU and uses a
+16-word rolling SHA schedule in the CUDA kernel.
 
 Run the difficulty-28 comparison command:
 

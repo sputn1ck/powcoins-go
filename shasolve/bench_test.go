@@ -10,6 +10,10 @@ func BenchmarkDifficulty28Metal(b *testing.B) {
 	benchmarkDifficulty28(b, MetalSolver{BatchSize: DefaultBatchSize})
 }
 
+func BenchmarkDifficulty28CUDA(b *testing.B) {
+	benchmarkDifficulty28(b, CUDASolver{BatchSize: DefaultBatchSize})
+}
+
 func BenchmarkDifficulty28WebGPU(b *testing.B) {
 	benchmarkDifficulty28(b, &WebGPUSolver{BatchSize: DefaultBatchSize})
 }

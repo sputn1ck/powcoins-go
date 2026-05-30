@@ -32,7 +32,7 @@ func main() {
 		relayTimeout = flag.Duration("relay-timeout", 30*time.Second, "P2P relay timeout")
 		peerMessages = flag.Bool("peer-messages", false, "print P2P messages during relay")
 		peerListen   = flag.Duration("peer-listen", 0, "after sending the tx, keep reading peer messages for this duration")
-		solverName   = flag.String("solver", "auto", "PoW solver: auto, cpu, metal, or webgpu")
+		solverName   = flag.String("solver", "auto", "PoW solver: auto, cpu, metal, cuda, or webgpu")
 	)
 	flag.Int64Var(&feeRate, "feerate", 0, "fee rate override in sat/vB; default is 1")
 	flag.Int64Var(&feeRate, "fee-rate", 0, "alias for -feerate")
@@ -128,6 +128,13 @@ func selectBackend(ctx context.Context, name string) (backendChoice, error) {
 			return backendChoice{}, err
 		}
 		return backendChoice{name: "metal", grind: solver, estimate: solver, device: result.Device}, nil
+	case "cuda":
+		solver := shasolve.CUDASolver{}
+		result, err := probeSolver(ctx, solver)
+		if err != nil {
+			return backendChoice{}, err
+		}
+		return backendChoice{name: "cuda", grind: solver, estimate: solver, device: result.Device}, nil
 	case "webgpu", "wgpu":
 		solver := &shasolve.WebGPUSolver{}
 		result, err := probeSolver(ctx, solver)
@@ -143,6 +150,7 @@ func selectBackend(ctx context.Context, name string) (backendChoice, error) {
 func autoBackend(ctx context.Context) (backendChoice, error) {
 	candidates := []backendChoice{
 		{name: "metal", grind: shasolve.MetalSolver{}, estimate: shasolve.MetalSolver{}},
+		{name: "cuda", grind: shasolve.CUDASolver{}, estimate: shasolve.CUDASolver{}},
 		{name: "webgpu", grind: &shasolve.WebGPUSolver{}, estimate: &shasolve.WebGPUSolver{}},
 		{name: "cpu", estimate: shasolve.CPUSolver{}, device: "cpu"},
 	}

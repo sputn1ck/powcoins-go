@@ -14,7 +14,7 @@ import (
 func main() {
 	var (
 		difficulty = flag.Uint("difficulty", 28, "powcoin trailing-zero difficulty")
-		backends   = flag.String("backends", "metal,webgpu", "comma-separated backends: metal,webgpu,cpu")
+		backends   = flag.String("backends", "metal,webgpu", "comma-separated backends: metal,cuda,webgpu,cpu")
 		batchSize  = flag.Uint("batch-size", 0, "nonces per GPU batch; 0 uses the backend default")
 		startNonce = flag.Uint("start-nonce", 0, "starting nonce")
 		limit      = flag.Uint64("limit", 0, "maximum hashes per backend; 0 searches the uint32 nonce space")
@@ -71,6 +71,8 @@ func solverByName(name string, batchSize uint32) (shasolve.Solver, error) {
 	switch strings.ToLower(name) {
 	case "metal":
 		return shasolve.MetalSolver{BatchSize: batchSize}, nil
+	case "cuda":
+		return shasolve.CUDASolver{BatchSize: batchSize}, nil
 	case "webgpu", "wgpu":
 		return &shasolve.WebGPUSolver{BatchSize: batchSize}, nil
 	case "cpu":
