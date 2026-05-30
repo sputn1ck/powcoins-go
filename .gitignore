@@ -1,5 +1,1 @@
-/faucetpow-go
-/extension/faucetpow.wasm
-/extension/wasm_exec.js
-/extension/shader_unrolled.wgsl
-/extension/robinet-webgpu-pow-extension.zip
+powcoins-go
