@@ -56,6 +56,26 @@ the minimum can avoid the most contested low-difficulty floor, at the cost of
 more grinding. `-fee-rate` and `-feerate` are aliases for the manual fee-rate
 override in sat/vB; the default is `1`.
 
+The faucet is raceable: every faucet UTXO can be claimed by anyone, and the
+first valid spend that propagates and confirms wins. The lowest-difficulty
+coins are fastest to grind, but they are also the easiest targets for everyone
+else. Setting `-min-difficulty` above the floor, for example `20` or `24`, can
+improve your chances by selecting less-contested UTXOs, though each additional
+difficulty bit roughly doubles the expected grind time.
+
+At 5 MH/s, expected average solve times are approximately:
+
+| Difficulty | Expected time |
+| --- | ---: |
+| 16 | 0.013 s |
+| 26 | 13.4 s |
+| 36 | 3.8 h |
+| 46 | 162.9 days |
+| 56 | 456.7 years |
+| 66 | 467,633.6 years |
+| 76 | 478,856,844.2 years |
+| 80 | 7,661,709,506.5 years |
+
 ## Library
 
 The claim builder can be used as a Go package:
