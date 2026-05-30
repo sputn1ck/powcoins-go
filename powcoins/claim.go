@@ -22,6 +22,7 @@ type ClaimOptions struct {
 	Address       string
 	EsploraURL    string
 	MaxPages      int
+	MinDifficulty int
 	MaxDifficulty int
 	FeeRate       int64
 	Progress      func(string, ...any)
@@ -51,6 +52,12 @@ func BuildClaim(ctx context.Context, opts ClaimOptions) (ClaimResult, error) {
 	}
 	if opts.MaxDifficulty <= 0 {
 		opts.MaxDifficulty = 26
+	}
+	if opts.MinDifficulty < 0 {
+		return ClaimResult{}, fmt.Errorf("min difficulty must be non-negative")
+	}
+	if opts.MinDifficulty > opts.MaxDifficulty {
+		return ClaimResult{}, fmt.Errorf("min difficulty %d exceeds max difficulty %d", opts.MinDifficulty, opts.MaxDifficulty)
 	}
 
 	destination, err := btcutil.DecodeAddress(opts.Address, &chaincfg.SigNetParams)
@@ -101,7 +108,8 @@ func BuildClaim(ctx context.Context, opts ClaimOptions) (ClaimResult, error) {
 	var selectedDiff int
 	var selectedConf int64
 	bestScore := math.Inf(-1)
-	easiest := 99
+	easiest := math.MaxInt
+	hardest := 0
 	for _, utxo := range utxos {
 		if utxo.BlockHeight <= 0 || utxo.BlockHeight > tip {
 			continue
@@ -109,7 +117,8 @@ func BuildClaim(ctx context.Context, opts ClaimOptions) (ClaimResult, error) {
 		conf := tip - utxo.BlockHeight + 1
 		diff := max(utxo.Script.MinDiff, utxo.Script.MaxDiff-int(conf/utxo.Script.Delay))
 		easiest = min(easiest, diff)
-		if diff > opts.MaxDifficulty {
+		hardest = max(hardest, diff)
+		if diff < opts.MinDifficulty || diff > opts.MaxDifficulty {
 			continue
 		}
 		score := math.Log2(float64(utxo.Value)) - float64(diff) + rand.Float64()
@@ -121,7 +130,8 @@ func BuildClaim(ctx context.Context, opts ClaimOptions) (ClaimResult, error) {
 		}
 	}
 	if bestScore == math.Inf(-1) {
-		return ClaimResult{}, fmt.Errorf("faucet is too difficult in scanned history; easiest=%d max=%d", easiest, opts.MaxDifficulty)
+		return ClaimResult{}, fmt.Errorf("no faucet UTXO found in difficulty range [%d,%d]; scanned range [%d,%d]",
+			opts.MinDifficulty, opts.MaxDifficulty, easiest, hardest)
 	}
 
 	csv := int64(selected.Script.MaxDiff-selectedDiff) * selected.Script.Delay

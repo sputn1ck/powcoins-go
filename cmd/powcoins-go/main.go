@@ -14,18 +14,21 @@ import (
 )
 
 func main() {
+	var feeRate int64
 	var (
 		address      = flag.String("address", "", "signet address to receive claimed coins")
 		esplora      = flag.String("esplora", powcoins.DefaultEsploraURL, "signet Esplora API base URL")
 		relayPeer    = flag.String("relay-peer", powcoins.DefaultRelayPeer, "signet P2P peer that accepts OP_CAT spends")
 		maxPages     = flag.Int("max-pages", 40, "maximum Esplora history pages to scan per faucet address")
+		minDiff      = flag.Int("min-difficulty", 0, "minimum PoW difficulty to select; useful to avoid highly contested low-difficulty UTXOs")
 		maxDiff      = flag.Int("max-difficulty", 26, "maximum PoW difficulty to attempt")
-		feerate      = flag.Int64("feerate", 0, "fee rate in sat/vB; default is 1")
 		dryRun       = flag.Bool("dry-run", false, "build and mine the transaction without relaying it")
 		relayTimeout = flag.Duration("relay-timeout", 30*time.Second, "P2P relay timeout")
 		peerMessages = flag.Bool("peer-messages", false, "print P2P messages during relay")
 		peerListen   = flag.Duration("peer-listen", 0, "after sending the tx, keep reading peer messages for this duration")
 	)
+	flag.Int64Var(&feeRate, "feerate", 0, "fee rate override in sat/vB; default is 1")
+	flag.Int64Var(&feeRate, "fee-rate", 0, "alias for -feerate")
 	flag.Parse()
 
 	if *address == "" {
@@ -37,8 +40,9 @@ func main() {
 		Address:       *address,
 		EsploraURL:    *esplora,
 		MaxPages:      *maxPages,
+		MinDifficulty: *minDiff,
 		MaxDifficulty: *maxDiff,
-		FeeRate:       *feerate,
+		FeeRate:       feeRate,
 		Progress: func(format string, args ...any) {
 			fmt.Printf(format+"\n", args...)
 		},

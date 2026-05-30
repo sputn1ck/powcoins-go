@@ -32,9 +32,10 @@ Useful options:
 ```sh
 ./powcoins-go \
   -address <signet-address> \
+  -min-difficulty 20 \
   -max-difficulty 26 \
   -max-pages 40 \
-  -feerate 1 \
+  -fee-rate 1 \
   -peer-messages \
   -peer-listen 5s \
   -relay-peer inquisition.bitcoin-signet.net:38333
@@ -50,6 +51,11 @@ history and derives unspent outputs locally instead of relying on
 transaction so you can inspect follow-up messages such as `reject`, `notfound`,
 or `ping`.
 
+`-min-difficulty` and `-max-difficulty` define the UTXO selection range. Raising
+the minimum can avoid the most contested low-difficulty floor, at the cost of
+more grinding. `-fee-rate` and `-feerate` are aliases for the manual fee-rate
+override in sat/vB; the default is `1`.
+
 ## Library
 
 The claim builder can be used as a Go package:
@@ -57,7 +63,9 @@ The claim builder can be used as a Go package:
 ```go
 result, err := powcoins.BuildClaim(ctx, powcoins.ClaimOptions{
     Address:       "tb1...",
+    MinDifficulty: 20,
     MaxDifficulty: 26,
+    FeeRate:       1,
 })
 ```
 
